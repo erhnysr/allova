@@ -223,8 +223,16 @@ contract SpendTest is AllowanceTestBase {
         vm.prank(owner);
         account.revokeAgent(agent1);
 
+        // v2: revoking bumps the intent epoch, so an epoch-0 intent is stale.
         (AllowanceAccount.PaymentIntent memory intent, bytes memory sig) = _signIntent(
             agentKey1, agent1, payee1, 100_000, 1, block.timestamp + 1 hours, bytes32(0), address(account)
+        );
+        vm.expectRevert(AllowanceAccount.StaleIntent.selector);
+        account.payWithSig(intent, sig);
+
+        // An intent signed for the current epoch reaches the policy check and is revoked.
+        (intent, sig) = _signIntent(
+            agentKey1, agent1, payee1, 100_000, account.nonceFor(agent1, 1), block.timestamp + 1 hours, bytes32(0), address(account)
         );
         vm.expectRevert(AllowanceAccount.AgentRevoked.selector);
         account.payWithSig(intent, sig);

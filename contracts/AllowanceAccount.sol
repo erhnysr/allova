@@ -38,6 +38,21 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
         uint64 lastRefill;
         uint128 totalSpent;
         bool payeeRestricted;
+        uint32 minInterval;
+        uint64 lastPaidAt;
+    }
+
+    /// @notice Full policy for `configureAgent` (v2). `minInterval` is the minimum
+    ///         number of seconds between two payments by the same agent (0 = off).
+    struct AgentPolicy {
+        string label;
+        uint128 maxPerPayment;
+        uint128 periodLimit;
+        uint32 periodSeconds;
+        uint128 totalLimit;
+        uint64 expiresAt;
+        bool payeeRestricted;
+        uint32 minInterval;
     }
 
     struct PayeeRule {
@@ -45,6 +60,7 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
         uint128 cap;
         uint128 spent;
         bool blocked;
+        bool configured; // v2: set by setPayee; an explicit allowed=false denies in both modes
     }
 
     struct PaymentIntent {
@@ -81,8 +97,17 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
     mapping(address => Agent) private _agents;
     mapping(address => bool) private _isAgent;
 
-    mapping(address => mapping(address => PayeeRule)) private _payeeRules;
+    /// @dev agent => rule generation => payee => rule. The generation is bumped by
+    ///      `removeAgent`, so a removed-then-re-added key starts with no payee rules.
+    mapping(address => mapping(uint64 => mapping(address => PayeeRule))) private _payeeRules;
+    mapping(address => uint64) private _ruleGeneration;
     mapping(address => mapping(uint256 => bool)) private _nonces;
+
+    /// @notice Signed-intent epoch per agent. A PaymentIntent is only valid when the
+    ///         upper 64 bits of its nonce equal the agent's current epoch. The epoch is
+    ///         bumped by `revokeAgent`, `removeAgent` and `invalidateIntents`, so intents
+    ///         signed before any of those can never be relayed afterwards.
+    mapping(address => uint64) public intentEpoch;
 
     ActivityEntry[64] private _activity;
     uint256 private _activityHead;
@@ -122,6 +147,9 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
     error NonceAlreadyUsed();
     error InvalidSignature();
     error RenounceDisabled();
+    error StaleIntent();
+    error TooSoon();
+    error InvalidMinInterval();
 
     // -------------------------------------------------------------------------
     // Events
@@ -147,6 +175,8 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
     event Withdrawn(address indexed to, uint128 amount);
     event Paid(address indexed agent, address indexed payee, uint128 amount, bytes32 ref, address relayer);
     event NonceUsed(address indexed agent, uint256 nonce);
+    event IntentsInvalidated(address indexed agent, uint64 newEpoch);
+    event MinIntervalSet(address indexed agent, uint32 minInterval);
 
     // -------------------------------------------------------------------------
     // Constructor
@@ -206,6 +236,7 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
         emit Withdrawn(to, amount);
     }
 
+    /// @notice v1-compatible policy setter. Keeps any existing `minInterval`.
     function setAgent(
         address agent,
         string calldata label,
@@ -216,6 +247,27 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
         uint64 expiresAt,
         bool payeeRestricted
     ) external onlyOwner {
+        _setAgent(agent, label, maxPerPayment, periodLimit, periodSeconds, totalLimit, expiresAt, payeeRestricted);
+    }
+
+    /// @notice v2 policy setter: the full policy, including `minInterval`, in one call.
+    function configureAgent(address agent, AgentPolicy calldata p) external onlyOwner {
+        if (p.minInterval > p.periodSeconds) revert InvalidMinInterval();
+        _setAgent(agent, p.label, p.maxPerPayment, p.periodLimit, p.periodSeconds, p.totalLimit, p.expiresAt, p.payeeRestricted);
+        _agents[agent].minInterval = p.minInterval;
+        emit MinIntervalSet(agent, p.minInterval);
+    }
+
+    function _setAgent(
+        address agent,
+        string calldata label,
+        uint128 maxPerPayment,
+        uint128 periodLimit,
+        uint32 periodSeconds,
+        uint128 totalLimit,
+        uint64 expiresAt,
+        bool payeeRestricted
+    ) internal {
         if (agent == address(0) || agent == owner() || agent == address(this)) revert InvalidAgentAddress();
         if (bytes(label).length > 32) revert InvalidLabel();
         if (maxPerPayment == 0 || maxPerPayment > periodLimit || periodLimit > totalLimit) revert InvalidLimits();
@@ -250,12 +302,22 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
         emit AgentSet(agent, label, maxPerPayment, periodLimit, periodSeconds, totalLimit, expiresAt, payeeRestricted);
     }
 
+    /// @notice Pause an agent. Also invalidates every intent it signed before now.
     function revokeAgent(address agent) external onlyOwner {
         _agents[agent].active = false;
+        _bumpEpoch(agent);
         emit AgentRevocation(agent);
     }
 
-    /// @notice Remove an agent entirely (swap-and-pop). Nonces and payee rules are preserved.
+    /// @notice Invalidate every not-yet-relayed intent signed by `agent`.
+    ///         Callable by the owner or by the agent key itself.
+    function invalidateIntents(address agent) external {
+        if (msg.sender != agent && msg.sender != owner()) revert NotAgentOrOwner();
+        _bumpEpoch(agent);
+    }
+
+    /// @notice Remove an agent entirely (swap-and-pop). Used nonces are kept; payee
+    ///         rules are cleared (new rule generation) and pending intents invalidated.
     function removeAgent(address agent) external onlyOwner {
         if (!_isAgent[agent]) revert UnknownAgent();
 
@@ -271,6 +333,8 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
 
         _isAgent[agent] = false;
         delete _agents[agent];
+        _ruleGeneration[agent] += 1;
+        _bumpEpoch(agent);
 
         emit AgentRemoved(agent);
     }
@@ -279,16 +343,13 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
         if (payee == address(0)) revert ZeroAddress();
         if (payee == address(this)) revert InvalidPayee();
 
-        uint128 existingSpent = _payeeRules[agent][payee].spent;
-        bool existingBlocked  = _payeeRules[agent][payee].blocked;
-        if (cap > 0 && cap < existingSpent) revert CapBelowSpent();
+        PayeeRule storage rule = _rule(agent, payee);
+        if (cap > 0 && cap < rule.spent) revert CapBelowSpent();
 
-        _payeeRules[agent][payee] = PayeeRule({
-            allowed: allowed,
-            cap: cap,
-            spent: existingSpent,
-            blocked: existingBlocked
-        });
+        // `blocked` is deliberately untouched: only setPayeeBlocked clears a block.
+        rule.allowed = allowed;
+        rule.cap = cap;
+        rule.configured = true;
 
         emit PayeeSet(agent, payee, allowed, cap);
     }
@@ -298,7 +359,7 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
         if (payee == address(0)) revert ZeroAddress();
         if (payee == address(this)) revert InvalidPayee();
 
-        _payeeRules[agent][payee].blocked = blocked;
+        _rule(agent, payee).blocked = blocked;
         emit PayeeBlocked(agent, payee, blocked);
     }
 
@@ -328,6 +389,7 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
 
     function payWithSig(PaymentIntent calldata intent, bytes calldata signature) external nonReentrant {
         if (block.timestamp > intent.deadline) revert DeadlinePassed();
+        if (uint64(intent.nonce >> 192) != intentEpoch[intent.agent]) revert StaleIntent();
         if (_nonces[intent.agent][intent.nonce]) revert NonceAlreadyUsed();
         if (intent.amount > type(uint128).max) revert OverPerPayment();
 
@@ -375,9 +437,8 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
         if (payee == address(0) || payee == address(this)) return 6;
 
         // Check 7: payee blocked (either mode) OR payeeRestricted and not allowed
-        PayeeRule storage rule = _payeeRules[agent][payee];
-        if (rule.blocked) return 7;
-        if (a.payeeRestricted && !rule.allowed) return 7;
+        PayeeRule storage rule = _rule(agent, payee);
+        if (_payeeDenied(a, rule)) return 7;
 
         if (amount > a.maxPerPayment) return 8;
 
@@ -387,6 +448,7 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
 
         if (rule.cap > 0 && uint256(rule.spent) + amount > rule.cap) return 11;
         if (IERC20(usdc).balanceOf(address(this)) < amount) return 12;
+        if (_tooSoon(a)) return 13;
 
         return 0;
     }
@@ -415,7 +477,17 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
     }
 
     function getPayee(address agent, address payee) external view returns (PayeeRule memory) {
-        return _payeeRules[agent][payee];
+        return _rule(agent, payee);
+    }
+
+    /// @notice Build a nonce valid for `agent`'s current epoch: (epoch << 192) | seq.
+    function nonceFor(address agent, uint192 seq) external view returns (uint256) {
+        return (uint256(intentEpoch[agent]) << 192) | uint256(seq);
+    }
+
+    /// @notice Contract version, for tooling.
+    function version() external pure returns (string memory) {
+        return "2.0.0";
     }
 
     function recentActivity() external view returns (ActivityEntry[] memory entries) {
@@ -468,11 +540,10 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
         if (block.timestamp >= a.expiresAt) revert AgentExpired();
         if (payee == address(0) || payee == address(this)) revert InvalidPayee();
 
-        PayeeRule storage rule = _payeeRules[agent][payee];
+        PayeeRule storage rule = _rule(agent, payee);
 
         // Check 7: blocked (both modes) takes priority, then payeeRestricted+not allowed
-        if (rule.blocked) revert PayeeNotAllowed();
-        if (a.payeeRestricted && !rule.allowed) revert PayeeNotAllowed();
+        if (_payeeDenied(a, rule)) revert PayeeNotAllowed();
 
         if (amount > a.maxPerPayment) revert OverPerPayment();
 
@@ -481,9 +552,11 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
         if (uint256(a.totalSpent) + amount > a.totalLimit) revert OverTotalLimit();
         if (rule.cap > 0 && uint256(rule.spent) + amount > rule.cap) revert OverPayeeCap();
         if (IERC20(usdc).balanceOf(address(this)) < amount) revert InsufficientBalance();
+        if (_tooSoon(a)) revert TooSoon();
 
         a.bucket = available - amount;
         a.lastRefill = uint64(block.timestamp);
+        a.lastPaidAt = uint64(block.timestamp);
         a.totalSpent += amount;
 
         rule.spent += amount;
@@ -514,6 +587,28 @@ contract AllowanceAccount is Ownable2Step, EIP712, ReentrancyGuard {
             ref: ref
         });
         _activityHead += 1;
+    }
+
+    function _rule(address agent, address payee) internal view returns (PayeeRule storage) {
+        return _payeeRules[agent][_ruleGeneration[agent]][payee];
+    }
+
+    /// @dev Denied if blocked (any mode), explicitly set to not-allowed (any mode, v2),
+    ///      or not allowlisted while the agent is payee-restricted.
+    function _payeeDenied(Agent storage a, PayeeRule storage rule) internal view returns (bool) {
+        if (rule.blocked) return true;
+        if (rule.configured && !rule.allowed) return true;
+        return a.payeeRestricted && !rule.allowed;
+    }
+
+    function _bumpEpoch(address agent) internal {
+        uint64 next = intentEpoch[agent] + 1;
+        intentEpoch[agent] = next;
+        emit IntentsInvalidated(agent, next);
+    }
+
+    function _tooSoon(Agent storage a) internal view returns (bool) {
+        return a.minInterval != 0 && a.lastPaidAt != 0 && block.timestamp < uint256(a.lastPaidAt) + a.minInterval;
     }
 
     function _available(Agent storage a) internal view returns (uint128) {

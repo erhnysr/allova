@@ -40,6 +40,17 @@ contract AllowanceHandler is Test {
     bool public badPaymentHappened;
     bool public replaySucceeded;
 
+    // v2: intents signed in an older epoch must never be relayable
+    mapping(address => AllowanceAccount.PaymentIntent) public pendingIntent;
+    mapping(address => bytes) public pendingSig;
+    mapping(address => uint64) public pendingEpoch;
+    mapping(address => bool) public hasPending;
+    bool public staleIntentSucceeded;
+
+    // v2: no two successful payments by one agent closer than its minInterval
+    mapping(address => uint64) public lastPaidMirror;
+    bool public intervalViolated;
+
     uint256 public successfulPaymentCount;
 
     mapping(address => uint256) public nextNonce;
@@ -136,6 +147,62 @@ contract AllowanceHandler is Test {
         try account.setAgent(agents[idx], "x", maxPer, pLim, pSec, totLim, expires, restricted) {} catch {}
     }
 
+    /// v2 setter with a min interval between payments.
+    function configureAgent(uint256 agentSeed, uint128 maxPer, uint128 pLim, uint32 pSec, uint128 totLim, bool restricted, uint32 gap) external {
+        uint256 idx = _agentIdx(agentSeed);
+        maxPer  = uint128(bound(maxPer, 1, 10_000_000));
+        pLim    = uint128(bound(pLim,   maxPer, 100_000_000));
+        totLim  = uint128(bound(totLim, pLim,   1_000_000_000));
+        pSec    = uint32(bound(pSec, 60, uint32(30 days)));
+        gap     = uint32(bound(gap, 0, pSec));
+        AllowanceAccount.AgentPolicy memory p = AllowanceAccount.AgentPolicy({
+            label: "x", maxPerPayment: maxPer, periodLimit: pLim, periodSeconds: pSec,
+            totalLimit: totLim, expiresAt: uint64(block.timestamp + 30 days),
+            payeeRestricted: restricted, minInterval: gap
+        });
+        vm.prank(owner);
+        try account.configureAgent(agents[idx], p) {} catch {}
+    }
+
+    function invalidateIntents(uint256 agentSeed, bool byAgent) external {
+        address agent = agents[_agentIdx(agentSeed)];
+        vm.prank(byAgent ? agent : owner);
+        try account.invalidateIntents(agent) {} catch {}
+    }
+
+    /// Sign an intent for the current epoch and hold it back (not relayed yet).
+    function signPending(uint256 agentSeed, uint256 payeeSeed, uint128 amount) external {
+        uint256 idx = _agentIdx(agentSeed);
+        address agent = agents[idx];
+        amount = uint128(bound(amount, 1, 10_000_000));
+        uint256 nonce = account.nonceFor(agent, uint192(nextNonce[agent]++));
+        AllowanceAccount.PaymentIntent memory intent = AllowanceAccount.PaymentIntent({
+            agent: agent, payee: payees[_payeeIdx(payeeSeed)], amount: amount,
+            nonce: nonce, deadline: block.timestamp + 365 days, ref: bytes32("pending")
+        });
+        pendingIntent[agent] = intent;
+        pendingSig[agent] = _sign(agentKeys[idx], intent);
+        pendingEpoch[agent] = account.intentEpoch(agent);
+        hasPending[agent] = true;
+    }
+
+    /// Relay a held-back intent only once its epoch is stale: it must always fail.
+    function relayStalePending(uint256 agentSeed) external {
+        address agent = agents[_agentIdx(agentSeed)];
+        if (!hasPending[agent] || account.intentEpoch(agent) == pendingEpoch[agent]) return;
+        try account.payWithSig(pendingIntent[agent], pendingSig[agent]) {
+            staleIntentSucceeded = true;
+        } catch {}
+    }
+
+    function _recordPaid(address agent, uint32 gapBefore) internal {
+        uint64 last = lastPaidMirror[agent];
+        if (gapBefore != 0 && last != 0 && block.timestamp < uint256(last) + gapBefore) {
+            intervalViolated = true;
+        }
+        lastPaidMirror[agent] = uint64(block.timestamp);
+    }
+
     function revokeAgent(uint256 agentSeed) external {
         vm.prank(owner);
         try account.revokeAgent(agents[_agentIdx(agentSeed)]) {} catch {}
@@ -154,9 +221,12 @@ contract AllowanceHandler is Test {
             // Reset per-agent mirror (struct cleared)
             // totalPaid and balance are unaffected — removal doesn't move funds
             agentSpentMirror[agent] -= spentSnap;
-            // Per-payee spent mirrors: we cannot reset them because the contract
-            // preserves payee rules (nonces and payee rules are NOT cleared).
-            // The on-chain PayeeRule.spent is also preserved, so no reset needed.
+            // v2: removeAgent starts a new payee-rule generation, so per-payee
+            // spent restarts at zero for this agent.
+            for (uint256 j = 0; j < 3; j++) {
+                payeeSpentMirror[agent][payees[j]] = 0;
+            }
+            lastPaidMirror[agent] = 0;
         } catch {}
     }
 
@@ -203,11 +273,13 @@ contract AllowanceHandler is Test {
         bool wasRevoked = !agState.active;
         bool wasExpired = agState.expiresAt != 0 && block.timestamp >= agState.expiresAt;
 
+        uint32 gapBefore = agState.minInterval;
         vm.prank(agent);
         try account.pay(payee, amount, bytes32(0)) {
             if (wasFrozen || wasRevoked || wasExpired) {
                 badPaymentHappened = true;
             }
+            _recordPaid(agent, gapBefore);
             totalPaidMirror += amount;
             agentSpentMirror[agent] += amount;
             payeeSpentMirror[agent][payee] += amount;
@@ -220,7 +292,7 @@ contract AllowanceHandler is Test {
         uint256 idx   = _agentIdx(agentSeed);
         address agent = agents[idx];
         address payee = payees[_payeeIdx(payeeSeed)];
-        uint256 nonce = nextNonce[agent]++;
+        uint256 nonce = account.nonceFor(agent, uint192(nextNonce[agent]++));
 
         // Guard: skip if already used (shouldn't happen, but safety)
         if (nonceUsedMirror[agent][nonce]) return;
@@ -244,6 +316,7 @@ contract AllowanceHandler is Test {
             if (wasFrozen || wasRevoked || wasExpired) {
                 badPaymentHappened = true;
             }
+            _recordPaid(agent, agState.minInterval);
             nonceUsedMirror[agent][nonce] = true;
             totalPaidMirror += amount;
             agentSpentMirror[agent] += amount;
@@ -387,6 +460,14 @@ contract InvariantTest is Test {
     // -----------------------------------------------------------------------
     // Invariant 5 (fix #8): totalPaid mirror == on-chain totalPaid
     // -----------------------------------------------------------------------
+    function invariant_noStaleIntent() public view {
+        assertFalse(handler.staleIntentSucceeded(), "intent from an old epoch was relayed");
+    }
+
+    function invariant_minInterval() public view {
+        assertFalse(handler.intervalViolated(), "two payments closer than minInterval");
+    }
+
     function invariant_totalPaidMirror() public view {
         assertEq(
             account.totalPaid(),
