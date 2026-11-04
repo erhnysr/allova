@@ -19,6 +19,10 @@ export interface AgentInfo {
   lastRefill: bigint       // uint64  → bigint
   totalSpent: bigint       // uint128 → bigint
   payeeRestricted: boolean
+  /** v2 only: minimum seconds between payments (0n = off, and always 0n on v1) */
+  minInterval: bigint
+  /** v2 only: timestamp of the agent's last payment (0n on v1) */
+  lastPaidAt: bigint
 }
 
 /**
@@ -38,6 +42,9 @@ export interface RawAgentResult {
   lastRefill: bigint
   totalSpent: bigint
   payeeRestricted: boolean
+  /** present on AllowanceAccount v2 only */
+  minInterval?: number
+  lastPaidAt?: bigint
 }
 
 /**
@@ -58,5 +65,7 @@ export function toAgentInfo(address: `0x${string}`, raw: RawAgentResult): AgentI
     lastRefill:      raw.lastRefill,
     totalSpent:      raw.totalSpent,
     payeeRestricted: raw.payeeRestricted,
+    minInterval:     BigInt(raw.minInterval ?? 0),
+    lastPaidAt:      raw.lastPaidAt ?? 0n,
   }
 }

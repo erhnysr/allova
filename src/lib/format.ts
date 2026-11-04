@@ -114,6 +114,7 @@ export function checkReasonText(code: number): string {
     10: 'Exceeds lifetime total',
     11: 'Exceeds payee cap',
     12: 'Account balance too low',
+    13: 'Too soon after the last payment',
   }
   return reasons[code] ?? `Unknown code ${code}`
 }
