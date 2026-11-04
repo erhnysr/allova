@@ -16,6 +16,8 @@
  *   sign <payee> <amount> [memo] [--out <file>]
  *   relay <file.json>
  *   pay <payee> <amount> [memo]
+ *   audit [--format csv|json] [--out <file>] [--all-agents] [--from-block <n>]
+ *   invalidate                (v2) cancel every signed-but-unrelayed intent of this agent
  *
  * All logs and headers go to stderr. Only the JSON output of "sign" goes to stdout,
  * so you can safely pipe: bun run agent sign ... > intent.json
@@ -25,6 +27,7 @@ import { readFileSync, writeFileSync } from 'fs'
 import { privateKeyToAccount } from 'viem/accounts'
 import type { Hex, Address } from 'viem'
 import {
+  auditToCsv,
   createAllowanceClient,
   decodeContractError,
   type NetworkName,
@@ -77,6 +80,10 @@ Commands:
        [--out <file>]                  Also write the JSON to <file>
   relay <file.json>                    Relay a previously signed intent file
   pay <payee> <amount> [memo]          Check → sign → relay in one step
+  audit [--format csv|json]            Export every payment (Paid events) of the account
+        [--out <file>] [--all-agents]  Default: this agent only, CSV to stdout
+        [--from-block <n>]
+  invalidate                           v2: cancel all of this agent's pending signed intents
 
 Environment:
   AGENT_PRIVATE_KEY      Agent private key (0x...)
@@ -125,6 +132,11 @@ Environment:
       log(`Lifetime cap:   ${policy.totalLimitUsdc} USDC`)
       log(`Total spent:    ${policy.totalSpentUsdc} USDC`)
       log(`Payee mode:     ${policy.payeeRestricted ? 'allowlist' : 'open'}`)
+      log(`Contract:       v${policy.version}`)
+      if (policy.version === 2) {
+        log(`Min interval:   ${policy.minIntervalSeconds ? `${policy.minIntervalSeconds}s between payments` : 'off'}`)
+        log(`Intent epoch:   ${policy.intentEpoch}`)
+      }
       logn()
       log(`Available now:  ${avail.periodAvailableUsdc} USDC (period)   ${avail.totalRemainingUsdc} USDC (lifetime)`)
       break
@@ -283,6 +295,48 @@ Environment:
       try {
         const result = await client.relay(signed, relayerKey)
         log(`✓  Paid ${amount} USDC to ${payee}`)
+        log(`   ${result.explorerUrl}`)
+      } catch (err) {
+        die(decodeContractError(err))
+      }
+      break
+    }
+
+    // ── audit ─────────────────────────────────────────────────────────────────
+    case 'audit': {
+      const flag = (name: string): string | null => {
+        const i = args.indexOf(name)
+        return i === -1 ? null : (args[i + 1] ?? die(`${name} requires a value`))
+      }
+      const format   = flag('--format') ?? 'csv'
+      const outFile  = flag('--out')
+      const fromRaw  = flag('--from-block')
+      if (format !== 'csv' && format !== 'json') die('--format must be csv or json')
+
+      log('Reading Paid events…')
+      const rows = await client.audit(account, {
+        agent:     args.includes('--all-agents') ? undefined : agentAddress,
+        fromBlock: fromRaw ? BigInt(fromRaw) : undefined,
+      })
+      const out = format === 'csv'
+        ? auditToCsv(rows, network)
+        : JSON.stringify(rows.map(r => ({ ...r, blockNumber: r.blockNumber.toString() })), null, 2) + '\n'
+
+      process.stdout.write(out)
+      if (outFile) {
+        writeFileSync(outFile, out, 'utf8')
+        log(`Wrote ${rows.length} payment(s) to ${outFile}`)
+      } else {
+        log(`${rows.length} payment(s)`)
+      }
+      break
+    }
+
+    // ── invalidate (v2) ───────────────────────────────────────────────────────
+    case 'invalidate': {
+      try {
+        const result = await client.invalidateIntents(account, agentAddress, agentKey)
+        log(`✓  All pending intents of ${agentAddress} invalidated`)
         log(`   ${result.explorerUrl}`)
       } catch (err) {
         die(decodeContractError(err))

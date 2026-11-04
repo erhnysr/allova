@@ -13,7 +13,8 @@
     "check": "bash scripts/check.sh",
     "contracts:build": "forge build",
     "contracts:test": "forge test",
-    "agent": "bun run agent/cli.ts"
+    "agent": "bun run agent/cli.ts",
+    "mcp": "bun run agent/mcp.ts"
   },
   "dependencies": {
     "@circle-fin/adapter-viem-v2": "^1.18.0",
@@ -23,6 +24,7 @@
     "@circle-fin/smart-contract-platform": "^10.8.0",
     "@circle-fin/user-controlled-wallets": "^10.8.0",
     "@circle-fin/w3s-pw-web-sdk": "^1.1.11",
+    "@modelcontextprotocol/sdk": "1.32.2",
     "@openzeppelin/contracts": "5.1.0",
     "@tanstack/react-query": "^5.62.7",
     "@web3icons/react": "^4.0.0",
@@ -35,7 +37,8 @@
     "sonner": "^1.7.1",
     "tailwind-merge": "^2.6.0",
     "viem": "^2.56.3",
-    "wagmi": "^2.19.5"
+    "wagmi": "^2.19.5",
+    "zod": "4.6.7"
   },
   "overrides": {
     "viem": "^2.56.3"
