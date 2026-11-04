@@ -132,3 +132,60 @@ const { hash } = await client.pay(account, agentKey, payee, '0.40', 'invoice-42'
 ## Memo encoding
 
 The `memo` / `ref` field is a `bytes32` on-chain. The CLI and client encode it as the UTF-8 bytes of the string, right-padded with zeros to 32 bytes. Maximum 32 UTF-8 bytes (not characters).
+
+---
+
+## v2 commands
+
+### audit
+
+Every payment of the account as CSV (default) or JSON, oldest first.
+
+```bash
+bun run agent audit                          # this agent, CSV to stdout
+bun run agent audit --all-agents --out payments.csv
+bun run agent audit --format json
+```
+
+Columns: `timestamp_utc, block, tx_hash, agent, payee, amount_usdc, memo, relayer, explorer_url`.
+
+### invalidate (AllowanceAccount v2)
+
+Cancel every intent this agent has signed but that has not been relayed yet.
+
+```bash
+bun run agent invalidate
+```
+
+## MCP server
+
+`agent/mcp.ts` exposes the agent's policy as MCP tools over stdio, so any MCP-capable agent
+can check its budget and pay. The limits stay onchain: the server cannot raise them.
+
+| Tool | Read-only | What it does |
+|---|---|---|
+| `allowance_status` | yes | Policy, budget left, min interval, intent epoch |
+| `allowance_check` | yes | Dry-run a payment; returns ok or the exact reason |
+| `allowance_pay` | no | Check, sign, relay; returns tx hash and explorer link |
+| `allowance_audit` | yes | Payment history, newest first |
+| `allowance_invalidate_intents` | no | Cancel pending signed intents (v2) |
+
+MCP client config:
+
+```json
+{
+  "mcpServers": {
+    "allowance": {
+      "command": "bun",
+      "args": ["run", "/path/to/allowance/agent/mcp.ts"],
+      "env": {
+        "AGENT_PRIVATE_KEY": "0x...",
+        "ALLOWANCE_ACCOUNT": "0x...",
+        "NETWORK": "testnet"
+      }
+    }
+  }
+}
+```
+
+Mainnet needs `NETWORK=mainnet` **and** `ALLOWANCE_ALLOW_MAINNET=1`.
