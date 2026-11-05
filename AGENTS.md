@@ -1,4 +1,4 @@
-# Allowance — Onchain Spending Limits for AI Agents
+# Allova (formerly Allowance) — Onchain Spending Limits for AI Agents
 
 > Built with Arc Studio — money-powered apps in minutes
 
@@ -6,7 +6,7 @@ This is the **project memory** - what Arc Studio remembers about building this a
 
 ## What This App Does
 
-Allowance is a smart-contract system that gives every AI agent its own USDC spending policy enforced entirely onchain: no third party, including the factory, can move funds or change a policy; only the account owner can.
+Allova is a smart-contract system that gives every AI agent its own USDC spending policy enforced entirely onchain: no third party, including the factory, can move funds or change a policy; only the account owner can.
 
 An owner deploys an `AllowanceAccount` through `AllowanceFactory`, funds it with USDC, and assigns each AI agent key a named policy. A policy specifies:
 

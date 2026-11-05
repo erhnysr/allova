@@ -1,12 +1,15 @@
-# Allowance
+# Allova
 
-Onchain spending limits for AI agents, built on Arc.
+**Give your agent an allowance, not your wallet.** Onchain USDC spending limits for AI agents, built on Arc.
 
-**Live app:** https://allowance-agents.vercel.app · **Source:** https://github.com/erhnysr/allowance · **Video:** https://youtu.be/aWAhs6EGqHw
+Allova is the new name of Allowance. The v1 build that is live on Arc mainnet keeps its original links:
+**Live app (v1):** https://allowance-agents.vercel.app · **v1 source:** https://github.com/erhnysr/allowance · **Video:** https://youtu.be/aWAhs6EGqHw
+
+This repository is **v2**: it fixes the three issues found in v1 review, adds a minimum interval between payments, and ships an audit export and an MCP server for agents. See [CHANGELOG.md](CHANGELOG.md).
 
 ## What it is
 
-Allowance lets you give an AI agent a USDC budget with hard onchain limits. Each agent key gets its own policy: a per-payment cap, a refilling period budget, a lifetime cap, an expiry date, and an optional payee allowlist. The limits are enforced by a smart contract, not by the agent itself — an agent with a leaked key can only spend what the policy allows.
+Allova lets you give an AI agent a USDC budget with hard onchain limits. Each agent key gets its own policy: a per-payment cap, a refilling period budget, a lifetime cap, an expiry date, and an optional payee allowlist. The limits are enforced by a smart contract, not by the agent itself — an agent with a leaked key can only spend what the policy allows.
 
 ## The problem
 
@@ -112,14 +115,16 @@ Test files:
 
 ## Known limitations
 
-These come from community and external review after the mainnet deployment. The deployed contracts are immutable, so they are documented here and planned for the next version.
+The v1 review findings are fixed in v2 (details and tests in [SECURITY.md](SECURITY.md)):
 
-- **Re-enabling a revoked key can revive old intents.** If you revoke or remove an agent and later re-add the same key with `setAgent`, a payment intent that key signed earlier, with a long deadline and an unused nonce, becomes valid again. It still has to pass the current policy. Do not re-add a revoked key; register a fresh agent key instead. The app and scripts sign intents that expire after 10 minutes.
-- **`removeAgent` keeps payee rules and counters.** Payee allow flags, caps, blocks and per-payee spent totals stay in place, so a key added again later inherits them.
-- **`setPayee(..., false, ...)` does not block in open mode.** In open mode only `setPayeeBlocked` stops payments to a payee. `allowed = false` only matters in allowlist mode, and a payee cap of 0 means no cap.
-- **The period budget can be spent in one burst.** The bucket starts full and its burst equals the period limit, so a leaked key can use a full period's budget at once. Set the period limit to an amount you are comfortable losing in one go; the lifetime cap is the hard ceiling.
+| v1 limitation | v2 |
+|---|---|
+| Re-enabling a revoked or removed key could revive old signed intents | Intents carry the agent's epoch; revoke, remove and `invalidateIntents` make older intents unusable |
+| `removeAgent` kept payee rules and counters | Removal starts a fresh set of payee rules |
+| `setPayee(..., false, ...)` did not block in open mode | An explicit `false` now denies the payee in both modes |
+| The period budget could be spent in one burst | `minInterval` sets the minimum time between two payments |
 
-Planned for v2: intents bound to an agent epoch, a minimum interval between payments, and clearing payee rules on `removeAgent`.
+Still true in v2: the token bucket can release up to about 2× the period limit within one period (a full bucket plus one period of refill); the lifetime cap is the hard ceiling. The contracts are unaudited: keep balances small.
 
 ## Security notes
 

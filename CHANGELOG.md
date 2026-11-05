@@ -2,6 +2,8 @@
 
 ## 2.0.0 (unreleased, Arc Testnet first)
 
+Allowance is now **Allova**. Contract names (`AllowanceFactory`, `AllowanceAccount`) and the EIP-712 domain stay the same.
+
 Fixes for the three findings reported against v1, plus burst control and agent tooling.
 
 ### Contracts

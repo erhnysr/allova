@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 /**
- * Allowance MCP server
+ * Allova MCP server
  *
- * Exposes an agent's Allowance policy as Model Context Protocol tools, so any
+ * Exposes an agent's Allova policy as Model Context Protocol tools, so any
  * MCP-capable agent framework can check its budget and pay in USDC. The limits are
  * enforced by the AllowanceAccount contract onchain: this server cannot raise them,
  * and neither can the agent.
@@ -27,7 +27,7 @@ import { createAllowanceClient, decodeContractError, type NetworkName } from './
 const VERSION = '2.0.0'
 
 function fail(msg: string): never {
-  console.error(`allowance-mcp: ${msg}`)
+  console.error(`allova-mcp: ${msg}`)
   process.exit(1)
 }
 
@@ -85,12 +85,12 @@ const payeeAddress = z
 
 // ── Server ────────────────────────────────────────────────────────────────────
 
-const server = new McpServer({ name: 'allowance', version: VERSION })
+const server = new McpServer({ name: 'allova', version: VERSION })
 
 server.registerTool(
-  'allowance_status',
+  'allova_status',
   {
-    title: 'Allowance: policy and budget',
+    title: 'Allova: policy and budget',
     description:
       'Return this agent\'s spending policy (per-payment cap, period budget, lifetime cap, expiry, ' +
       'payee mode, min interval) and what it can spend right now. Call this before planning paid work.',
@@ -111,9 +111,9 @@ server.registerTool(
 )
 
 server.registerTool(
-  'allowance_check',
+  'allova_check',
   {
-    title: 'Allowance: dry-run a payment',
+    title: 'Allova: dry-run a payment',
     description:
       'Check whether a payment would be accepted by the account contract right now, without sending ' +
       'anything. Returns ok=true or the exact reason it would be rejected.',
@@ -131,9 +131,9 @@ server.registerTool(
 )
 
 server.registerTool(
-  'allowance_pay',
+  'allova_pay',
   {
-    title: 'Allowance: pay in USDC',
+    title: 'Allova: pay in USDC',
     description:
       'Pay `amount` USDC to `payee` from the shared account, within this agent\'s onchain policy. ' +
       'Runs check() first; if the policy would reject the payment nothing is sent. ' +
@@ -159,9 +159,9 @@ server.registerTool(
 )
 
 server.registerTool(
-  'allowance_audit',
+  'allova_audit',
   {
-    title: 'Allowance: payment history',
+    title: 'Allova: payment history',
     description:
       'Return the onchain payment record (Paid events): time, payee, amount, memo, relayer and ' +
       'explorer link for each payment. Newest first.',
@@ -187,9 +187,9 @@ server.registerTool(
 )
 
 server.registerTool(
-  'allowance_invalidate_intents',
+  'allova_invalidate_intents',
   {
-    title: 'Allowance: cancel pending signed payments',
+    title: 'Allova: cancel pending signed payments',
     description:
       'Invalidate every payment intent this agent has signed but that has not been relayed yet ' +
       '(AllowanceAccount v2). Use it if a signed intent may have leaked.',
@@ -208,4 +208,4 @@ server.registerTool(
 
 const transport = new StdioServerTransport()
 await server.connect(transport)
-console.error(`allowance-mcp ${VERSION} ready — agent ${agentAddress} on ${network}, account ${account}`)
+console.error(`allova-mcp ${VERSION} ready — agent ${agentAddress} on ${network}, account ${account}`)

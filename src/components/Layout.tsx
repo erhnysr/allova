@@ -98,7 +98,7 @@ export function Sidebar({ activeItem, onNav, showAccountNav, isTestnet }: Sideba
       <div className="flex items-center gap-2.5 px-5 h-14 border-b border-[#1F2A47] shrink-0">
         <LogoMark />
         <span className="text-[#E6EBF5] font-medium text-base select-none">
-          Allowance
+          Allova
         </span>
       </div>
 
@@ -196,7 +196,7 @@ export function MobileTopBar({ activeItem, onNav, showAccountNav, isTestnet }: S
       <div className="flex items-center gap-2 shrink-0 pr-2">
         <LogoMark />
         <span className="text-[#E6EBF5] font-medium text-sm select-none">
-          Allowance
+          Allova
         </span>
       </div>
 

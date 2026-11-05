@@ -1,8 +1,8 @@
 # Security policy
 
-Allowance has not had an independent audit. Use small balances.
+Allova (formerly Allowance) has not had an independent audit. Use small balances.
 
-**Report a vulnerability privately:** https://github.com/erhnysr/allowance/security/advisories/new
+**Report a vulnerability privately:** https://github.com/erhnysr/allova/security/advisories/new
 Please do not open a public issue. Include the function, steps to reproduce and the impact.
 
 ## Fixed in 2.0.0

@@ -1,4 +1,4 @@
-# Allowance — agent client
+# Allova — agent client
 
 A small viem-only module for interacting with an AllowanceAccount from any agent framework.
 
@@ -164,20 +164,20 @@ can check its budget and pay. The limits stay onchain: the server cannot raise t
 
 | Tool | Read-only | What it does |
 |---|---|---|
-| `allowance_status` | yes | Policy, budget left, min interval, intent epoch |
-| `allowance_check` | yes | Dry-run a payment; returns ok or the exact reason |
-| `allowance_pay` | no | Check, sign, relay; returns tx hash and explorer link |
-| `allowance_audit` | yes | Payment history, newest first |
-| `allowance_invalidate_intents` | no | Cancel pending signed intents (v2) |
+| `allova_status` | yes | Policy, budget left, min interval, intent epoch |
+| `allova_check` | yes | Dry-run a payment; returns ok or the exact reason |
+| `allova_pay` | no | Check, sign, relay; returns tx hash and explorer link |
+| `allova_audit` | yes | Payment history, newest first |
+| `allova_invalidate_intents` | no | Cancel pending signed intents (v2) |
 
 MCP client config:
 
 ```json
 {
   "mcpServers": {
-    "allowance": {
+    "allova": {
       "command": "bun",
-      "args": ["run", "/path/to/allowance/agent/mcp.ts"],
+      "args": ["run", "/path/to/allova/agent/mcp.ts"],
       "env": {
         "AGENT_PRIVATE_KEY": "0x...",
         "ALLOWANCE_ACCOUNT": "0x...",

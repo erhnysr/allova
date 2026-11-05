@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 /**
- * Allowance agent CLI
+ * Allova agent CLI
  *
  * Usage: bun run agent/cli.ts <command> [args]
  *
@@ -71,7 +71,7 @@ async function main(): Promise<void> {
   if (!command || command === '--help' || command === '-h') {
     // Help goes to stdout as it is the intended output
     console.log(`
-Allowance agent CLI
+Allova agent CLI
 
 Commands:
   status                               Print the agent policy and current availability

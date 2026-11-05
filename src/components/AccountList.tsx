@@ -47,7 +47,7 @@ export function AccountList({ onSelectAccount }: Props) {
   if (!net) {
     return (
       <div className="rounded-[20px] border border-[#1F2A47] bg-[#121B33] p-8 flex flex-col items-center gap-4 text-center">
-        <p className="text-[#E6EBF5] font-medium">Allowance runs on Arc.</p>
+        <p className="text-[#E6EBF5] font-medium">Allova runs on Arc.</p>
         <p className="text-sm text-[#8C97B2]">Switch network:</p>
         <div className="flex flex-wrap gap-3 justify-center">
           {SUPPORTED_NETWORKS.map(n => (
@@ -71,7 +71,7 @@ export function AccountList({ onSelectAccount }: Props) {
 
       {showCreate && (
         <div className="rounded-[20px] border border-[#2A3658] bg-[#121B33] p-5 flex flex-col gap-4">
-          <p className="text-sm text-[#8C97B2]">Deploy a new AllowanceAccount. You will be the owner.</p>
+          <p className="text-sm text-[#8C97B2]">Deploy a new Allova account. You will be the owner.</p>
           <Input
             label="Guardian address (optional)"
             placeholder="0x… or leave blank"

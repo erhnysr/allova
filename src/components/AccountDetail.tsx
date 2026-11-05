@@ -70,7 +70,7 @@ export function AccountDetail({ accountAddress, activeNav, onBack }: Props) {
         <div className="rounded-[20px] border border-[#2A3658] bg-[#121B33] px-6 py-8 text-center flex flex-col gap-3">
           <p className="text-[#F2C27B] font-medium text-sm">Not deployed yet</p>
           <p className="text-[#8C97B2] text-xs">
-            Allowance isn't deployed on {chainName} yet.
+            Allova isn't deployed on {chainName} yet.
           </p>
           <button
             onClick={onBack}
@@ -120,10 +120,10 @@ export function AccountDetail({ accountAddress, activeNav, onBack }: Props) {
           ← All accounts
         </button>
         <div className="rounded-[20px] border border-[#5B3440] bg-[#1E1A2E] px-6 py-8 text-center flex flex-col gap-3">
-          <p className="text-[#F2A0A0] font-medium text-sm">Not an Allowance account</p>
+          <p className="text-[#F2A0A0] font-medium text-sm">Not an Allova account</p>
           <p className="text-[#8C97B2] text-xs">
             <span className="font-mono text-[#C3D1F5]">{accountAddress}</span>
-            {' '}isn't an Allowance account on {chainName}.
+            {' '}isn't an Allova account on {chainName}.
           </p>
           <button
             onClick={onBack}
